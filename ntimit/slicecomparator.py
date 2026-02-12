@@ -1,9 +1,9 @@
-import scipy.signal as sig
-import numpy as np
-import sounddevice as sd
+
+import os
 import soundfile as sf
 
 from ntimit.frcodec import run_vocoder_simulation
+from ntimit.utilities import extract_voice_features, longest_no_distortion, load_wav, extract_bandwidth
 
 
 # sa2: fr
@@ -22,118 +22,6 @@ from ntimit.frcodec import run_vocoder_simulation
 # SI1406 101 121 21
 
 
-def load_wav(path, target_fs=8000):
-    x, fs = sf.read(path)
-    if x.ndim > 1:
-        x = x[:, 0]
-
-    x = x.astype(np.float64)
-
-    if fs != target_fs:
-        x = sig.resample_poly(x, target_fs, fs)
-        fs = target_fs
-
-    x /= np.max(np.abs(x)) + 1e-9
-    return fs, x
-
-
-def frame_signal(x, fs, frame_ms=20):
-    frame_len = int(fs * frame_ms / 1000)
-    num_frames = len(x) // frame_len
-
-    frames = np.reshape(
-        x[:num_frames * frame_len],
-        (num_frames, frame_len)
-    )
-
-    return frames
-
-
-def number_of_frames(frames):
-    return frames.shape[0]
-
-
-def bitrate_pcm(fs, bit_depth=16):
-    return fs * bit_depth  # bits per second
-
-
-def frame_fft(frame, fs):
-    spectrum = np.abs(np.fft.rfft(frame))
-    freqs = np.fft.rfftfreq(len(frame), d=1 / fs)
-    return freqs, spectrum
-
-
-def effective_bandwidth(frame, fs, energy_ratio=0.95):
-    freqs, spec = frame_fft(frame, fs)
-    energy = spec ** 2
-    if np.sum(energy)==0:
-        cum_energy = 0
-    else:
-        cum_energy = np.cumsum(energy) / np.sum(energy)
-
-    idx = np.where(cum_energy >= energy_ratio)[0][0]
-    return freqs[idx]
-
-
-def dominant_frequency(frame, fs):
-    freqs, spec = frame_fft(frame, fs)
-    return freqs[np.argmax(spec)]
-
-
-def extract_voice_features(x, fs):
-    frames = frame_signal(x, fs)
-    features = {
-        "num_frames": number_of_frames(frames),
-        "bitrate_pcm": bitrate_pcm(fs),
-        "dominant_freqs": [],
-        "bandwidths": []
-    }
-
-    for f in frames:
-        features["dominant_freqs"].append(
-            dominant_frequency(f, fs)
-        )
-        features["bandwidths"].append(
-            effective_bandwidth(f, fs)
-        )
-
-    return features
-
-
-def mse(x, y):
-    min_len = min(len(x), len(y))
-    return np.mean((x[:min_len] - y[:min_len]) ** 2)
-
-
-def snr(original, distorted):
-    min_len = min(len(original), len(distorted))
-
-    noise = original[:min_len] - distorted[:min_len]
-
-    return 10 * np.log10(
-        np.sum(original[:min_len] ** 2) /
-        (np.sum(noise ** 2) + 1e-9))
-
-
-def spectral_distortion(x, y, fs):
-    fx = frame_signal(x, fs)
-    fy = frame_signal(y, fs)
-
-    min_frames = min(len(fx), len(fy))
-    dist = []
-
-    for i in range(min_frames):
-        _, sx = frame_fft(fx[i], fs)
-        _, sy = frame_fft(fy[i], fs)
-
-        sx += 1e-9
-        sy += 1e-9
-
-        dist.append(
-            np.mean(np.abs(20 * np.log10(sx / sy)))
-        )
-
-    return np.mean(dist)
 
 
 def slice_wav_by_frames(input_wav, output_wav, start_frame, end_frame, frame_ms=20):
@@ -148,42 +36,13 @@ def slice_wav_by_frames(input_wav, output_wav, start_frame, end_frame, frame_ms=
 
 
 
-def longest_no_distortion(ogpath, decpath):
-
-    fs, original = load_wav(ogpath)
-
-    features = extract_voice_features(original, fs)
-    bandwidth_og = features["bandwidths"]
-    fs, decoded = load_wav(decpath)
-    features = extract_voice_features(decoded, fs)
-    bandwidth_dec = features["bandwidths"]
-
-    # print("Frames:", features["num_frames"])
-    # print("PCM Bitrate:", features["bitrate_pcm"], "bps")
-    #  print("Dominant Freq:", features["dominant_freqs"])
-    #print("Bandwidth:", features["bandwidths"])
-    c = 0
-
-    for i in range(len(bandwidth_og)):
-        if bandwidth_og[i] != bandwidth_dec[i]:
-            if i - c > 10:
-                 print(bandwidth_og[i] - bandwidth_dec[i], c, i - 1, i - c)
-            c = i
-
-    #    print("-" * 20)
-    #    print("MSE:", mse(original, decoded))
-    #    print("SNR (dB):", snr(original, decoded))
-    #    print("Spectral Distortion (dB):", spectral_distortion(original, decoded, fs))
 
 def comparator(ogpath, decpath):
 
     fs, original = load_wav(ogpath)
-
-    features = extract_voice_features(original, fs)
-    bandwidth_og = features["bandwidths"]
+    bandwidth_og = extract_bandwidth(original, fs)
     fs, decoded = load_wav(decpath)
-    features = extract_voice_features(decoded, fs)
-    bandwidth_dec = features["bandwidths"]
+    bandwidth_dec = extract_bandwidth(decoded, fs)
 
     t = 0
     for i in range(len(bandwidth_og)):
@@ -209,16 +68,16 @@ def create_slices(name, s, f, d, c): #fin, diff, count
 def test_slices(name,start,finish,l):
 
     while start+l<=finish:
-        inp = name+"_" + str(start) +".wav"
-        out = name+"_" + str(start) +"_FR.wav"
+        inp = name + str(start) +".wav"
+        out = name+ str(start) +"_FR.wav"
         comparator(inp, out)
         start =start+l
 
 def test_slices_WAV(name,start,finish,l):
 
     while start+l<=finish:
-        inp = name+"_" + str(start) +".WAV"
-        out = name+"_" + str(start) +"_FR.WAV"
+        inp = name+ str(start) +".WAV"
+        out = name+ str(start) +"_FR.WAV"
         comparator(inp, out)
         start =start+l
 
@@ -226,8 +85,8 @@ def test_slices_WAV(name,start,finish,l):
 def vocode_slices_WAV(name,start,finish,l):
 
     while start+l<=finish:  # ran/frame_count
-        inp = name+"_" + str(start) +".WAV"
-        out = name+"_" + str(start) +"_FR.WAV"
+        inp = name + str(start) +".WAV"
+        out = name + str(start) +"_FR.WAV"
         run_vocoder_simulation(inp, out, 'exe/fr_enc.exe', 'exe/fr_dec.exe')
         start =start+l
 
@@ -283,17 +142,53 @@ def test_winners_WAV(testhalf, start,finish,l):
     vocode_slices_WAV(n,start,finish,l)
     test_slices_WAV(n, start, finish, l)
 
-def sliceandtest():
-    l = 12
-    testhalf = "test/SA1-3_"
-    slice_up_WAV("SA1-3.WAV", testhalf, 115, l)
-    slice_up_WAV("SA1-3.WAV", testhalf, 115 + l, l)
-    slice_up_WAV("SA1-3.WAV", testhalf, 115 + l + l, l)
-    slice_up_WAV("SA1-3.WAV", testhalf, 115 + l + l + l, l)
+def slice_and_test_WAV(og_full, test_half, start, finish, l):
+    #l = 12
+    #testhalf = "test/SA1-3_"
+    s = start
+    while start + l <= finish:  # ran/frame_count
+        slice_up_WAV(og_full, test_half, start, l)
+        start = start + l
 
-    test_winners_WAV("test/SA1-3", 115, 166, 12)
+    test_winners_WAV(test_half, s, finish, l)
     # comparator("test/SA1-3_115.wav","recorded/REC_SA1-3_115.wav")
 
+def test_the_alphabet():
+    comparator("test/SA1-3_115.WAV", "test/SA1-3_115_FR.WAV")
+    comparator("test/SA1-3_127.WAV", "test/SA1-3_127_FR.WAV")
+    comparator("test/SA1-3_139.WAV", "test/SA1-3_139_FR.WAV")
+    comparator("test/SA1-3_151.WAV", "test/SA1-3_151_FR.WAV")
+
+    print(os.path.exists("test/SA2_215.wav"))
+    path = "test/SA2_215.wav"
+    comparator("test/SA2_215.wav", "test/SA2_215_FR.WAV")
+
+    # comparator("test/SA2-2_97.WAV", "test/SA2-2_97_FR.WAV")
+    # comparator("test/SA2-2_124.WAV", "test/SA2-2_124_FR.WAV")
+    # comparator("test/SA2-2_132.WAV", "test/SA2-2_132_FR.WAV")
+
+
+    # comparator("test/SA2_148.WAV", "test/SA2_148_FR.WAV")
+    # comparator("test/SA2_160.WAV", "test/SA2_160_FR.WAV")
+
+    # comparator("test/SA2_188.WAV", "test/SA2_188_FR.WAV")
+    # comparator("test/SA2_200.WAV", "test/SA2_200_FR.WAV")
+#
+# 50.0 11 28 18
+# 50.0 35 50 16
+# -50.0 60 75 16
+# 50.0 88 101 14
+# 50.0 146 122 11
+# 50.0 134 157 24
+def add_to_alphabet():
+    name ="OG/SI648.WAV"
+    enc = "OG/SI648_ENC.wav"
+    #run_vocoder_simulation(name,  enc, "exe/fr_enc.exe", "exe/fr_dec.exe")
+    #longest_no_distortion(name,enc)
+    s=146
+    slice_and_test_WAV(name ,"test/SI648_",s,s+12,12)
 
 if __name__ == "__main__":
-   comparator("test/SA1-3_115.WAV","recorded/REC_SA1-3_115.WAV")
+    #comparator("test/SA2-2_132.WAV","test/SA2-2_132_FR.WAV")
+    add_to_alphabet()
+
