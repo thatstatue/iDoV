@@ -1,8 +1,5 @@
-from threading import Thread
-from pygame.examples.music_drop_fade import play_file
 
-from ntimit.encrypter import voices, voices_start, voices_finish
-from ntimit.virtualmic import record_from_virtual_speaker, play_wav
+from ntimit.encrypter import voices
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
@@ -13,13 +10,11 @@ import os
 buffer = "recorded/buffer.WAV"
 device = 'pulse'
 SAMPLE_RATE = 16000
-BLOCK_SIZE_SECONDS = 0.02
+BLOCK_SIZE_SECONDS = 0.24
 HEX_DATA = []
 CHAR_DATA = []
-SILENCE_THRESHOLD = 150
-# Load voice signatures at module level
+SILENCE_THRESHOLD = 10
 VOICE_SIGNATURES = []
-SAMPLE_RATE = 16000
 
 
 def load_voice_signatures():
@@ -55,127 +50,96 @@ def load_voice_signatures():
 
 def hex_to_text(hex_str):
     try:
-        return bytes.fromhex(hex_str).decode('utf-8')
+        v = bytes.fromhex(hex_str).decode('utf-8')
+
+        return v
     except:
         return "?"
 
 
 def voice_to_hex(audio_chunk):
-    """Match audio chunk to a voice signature and return corresponding hex"""
+    """Match audio chunk to a voice signature using Pearson correlation"""
     global VOICE_SIGNATURES
 
     print(
         f"\n[DEBUG] voice_to_hex called with audio_chunk length: {len(audio_chunk) if audio_chunk is not None else 'None'}")
-    print(f"[DEBUG] Number of voice signatures available: {len(VOICE_SIGNATURES)}")
 
-    max_similarity = 0
+    max_similarity = -1  # شروع با -1 چون پیرسون می‌تواند منفی باشد
     best_match_index = -1
+    similarities = []
 
     for i, trigger in enumerate(VOICE_SIGNATURES):
-        print(f"\n[DEBUG] Checking signature {i}: length={len(trigger) if trigger is not None else 'None'}")
-
-        if trigger is None:
-            print(f"[DEBUG] Signature {i} is None, skipping")
+        if trigger is None or len(audio_chunk) < len(trigger):
             continue
 
-        if len(audio_chunk) < len(trigger):
-            print(
-                f"[DEBUG] Audio chunk length ({len(audio_chunk)}) < trigger length ({len(trigger)}), skipping signature {i}")
-            continue
-
-        similarity = calculate_similarity(audio_chunk, trigger)
-        print(f"[DEBUG] Similarity for signature {i}: {similarity:.4f}")
+        similarity = calculate_similarity_fast(audio_chunk, trigger)  # استفاده از روش سریع
+        similarities.append((i, similarity))
+        print(f"[DEBUG] Signature {i}: similarity = {similarity:.4f}")
 
         if similarity > max_similarity:
-            print(
-                f"[DEBUG] New best match: signature {i} with similarity {similarity:.4f} (previous best: {max_similarity:.4f})")
             max_similarity = similarity
             best_match_index = i
 
-    # Set a threshold for what counts as a match
-    print(f"\n[DEBUG] Final max_similarity: {max_similarity:.4f}, best_match_index: {best_match_index}")
+    # آستانه مناسب برای پیرسون (بعد از تبدیل به 0-1)
+    threshold = 0.6  # می‌توانید تنظیم کنید
 
-    if max_similarity > 0.5 and best_match_index >= 0:
-        hex_result = format(best_match_index, 'x')
-        print(
-            f"[DEBUG] MATCH FOUND! Index {best_match_index} -> hex '{hex_result}' with similarity {max_similarity:.4f}")
-        return hex_result
+    print(f"\n[DEBUG] Best match: index {best_match_index}, similarity {max_similarity:.4f}")
 
-    if best_match_index >= 0:
-        print(f"[DEBUG] No match: best similarity {max_similarity:.4f} below threshold 0.5")
-    else:
-        print("[DEBUG] No valid matches found")
+    # محاسبه فاصله از دومین شباهت بزرگ (برای اطمینان بیشتر)
+    if len(similarities) > 1:
+        similarities.sort(key=lambda x: x[1], reverse=True)
+        if similarities[0][1] > threshold and similarities[0][1] - similarities[1][1] > 0.1:
+            print(f"[DEBUG] Clear match with margin: {similarities[0][1] - similarities[1][1]:.4f}")
+            return similarities[0][0]
+
+    if max_similarity > threshold and best_match_index >= 0:
+        return best_match_index
 
     return None
 
-
-def calculate_similarity(audio_segment, trigger_sig):
-    """Calculate similarity between audio segment and trigger signature"""
-    print(f"\n[DEBUG] calculate_similarity called")
+def calculate_similarity_fast(audio_segment, trigger_sig):
+    """Fast similarity using FFT-based cross-correlation"""
+    print(f"\n[DEBUG] calculate_similarity_fast called")
 
     if trigger_sig is None:
-        print("[DEBUG] Trigger signature is None, returning 0")
         return 0
 
     if len(audio_segment) < len(trigger_sig):
-        print(f"[DEBUG] Audio segment length ({len(audio_segment)}) < trigger length ({len(trigger_sig)}), returning 0")
         return 0
 
-    # Ensure both are numpy arrays of float type
-    original_audio_len = len(audio_segment)
-    original_trigger_len = len(trigger_sig)
+    # Convert to numpy arrays
+    audio = np.asarray(audio_segment, dtype=np.float32)
+    trigger = np.asarray(trigger_sig, dtype=np.float32)
 
-    audio_segment = np.asarray(audio_segment, dtype=np.float32)
-    trigger_sig = np.asarray(trigger_sig, dtype=np.float32)
+    # Normalize both signals to zero mean and unit variance
+    audio_norm = (audio - np.mean(audio)) / (np.std(audio) + 1e-10)
+    trigger_norm = (trigger - np.mean(trigger)) / (np.std(trigger) + 1e-10)
 
-    print(f"[DEBUG] Converted to numpy arrays: audio shape={audio_segment.shape}, trigger shape={trigger_sig.shape}")
+    # Use FFT for fast cross-correlation
+    # Pad to next power of 2 for FFT efficiency
+    n = len(audio) + len(trigger) - 1
+    n_fft = 1 << (n - 1).bit_length()
 
-    # Normalize both signals
-    audio_max = np.max(np.abs(audio_segment))
-    if audio_max > 0:
-        audio_segment = audio_segment / audio_max
-        print(f"[DEBUG] Normalized audio with max value: {audio_max:.4f}")
-    else:
-        print("[DEBUG] Audio max is 0, skipping normalization")
+    # Compute FFT of both signals
+    audio_fft = np.fft.rfft(audio_norm, n=n_fft)
+    trigger_fft = np.fft.rfft(trigger_norm, n=n_fft)
 
-    trigger_max = np.max(np.abs(trigger_sig))
-    if trigger_max > 0:
-        trigger_sig = trigger_sig / trigger_max
-        print(f"[DEBUG] Normalized trigger with max value: {trigger_max:.4f}")
-    else:
-        print("[DEBUG] Trigger max is 0, skipping normalization")
+    # Cross-correlation in frequency domain
+    correlation = np.fft.irfft(audio_fft * np.conj(trigger_fft), n=n_fft)
 
-    # Cross-correlation
-    try:
-        correlation = np.correlate(audio_segment, trigger_sig, mode='valid')
-        print(f"[DEBUG] Correlation result shape: {correlation.shape}, max correlation: {np.max(correlation):.4f}")
+    # Take only valid part
+    correlation = correlation[:len(audio) - len(trigger) + 1]
 
-        # Normalize correlation
-        norm_factor = np.sqrt(np.sum(trigger_sig ** 2) * np.sum(audio_segment[:len(trigger_sig)] ** 2))
-        print(f"[DEBUG] Normalization factor: {norm_factor:.4f}")
+    # Normalize correlation to [-1, 1] range
+    max_corr = np.max(correlation) / len(trigger)
 
-        if norm_factor > 0:
-            similarity = np.max(correlation) / norm_factor
-            print(f"[DEBUG] Calculated similarity: {similarity:.4f}")
-        else:
-            similarity = 0
-            print("[DEBUG] Norm factor is 0, similarity set to 0")
+    # Convert to similarity in [0, 1] range
+    similarity = (max_corr + 1) / 2
 
-        return similarity
-    except Exception as e:
-        print(f"[DEBUG] Error in correlation: {e}")
-        return 0
+    print(f"[DEBUG] FFT method - Max correlation: {max_corr:.4f}")
+    print(f"[DEBUG] FFT method - Similarity: {similarity:.4f}")
 
-def dummy_listener():
-    device = 'pulse'
-    sr = 16000
-    duration = 1000 * 15
-    record_file = "recorded/REC_DELETE_LATER.wav"
-
-    play_thread = Thread(target=play_wav, args=(play_file, device, False))
-    play_thread.start()
-    record_from_virtual_speaker(record_file, device, sr, duration)
-    play_thread.join()
+    return similarity
 
 
 class AudioListener:
@@ -183,10 +147,8 @@ class AudioListener:
         self.input_device = input_device
         self.samplerate = samplerate
         self.output_dir = output_dir
-
-        # 20ms block size (at 16kHz = 320 samples)
-        self.block_duration = BLOCK_SIZE_SECONDS  # 20ms
-        self.block_size = int(self.samplerate * self.block_duration)*4
+        self.block_duration = BLOCK_SIZE_SECONDS  # 20 * 12 ms = 240 ms
+        self.block_size = int(self.samplerate * self.block_duration)
 
         os.makedirs(output_dir, exist_ok=True)
 
@@ -253,12 +215,6 @@ class AudioListener:
             if hex_chunk:  # Only append if we got a valid hex value
                 print("hex is: ", hex_chunk)
                 HEX_DATA.append(hex_chunk)
-                try:
-                    char_chunk = hex_to_text(hex_chunk)
-                    print("character is: ", char_chunk)
-                    CHAR_DATA.append(char_chunk)
-                except:
-                    print("Could not decode hex to text")
 
     def _stop_recording(self):
         if self.recording_frames:
@@ -278,6 +234,26 @@ class AudioListener:
 
     def decrypt_voice(self):
         print("Decrypted HEX data:", HEX_DATA)
+        i = 0
+        if len(HEX_DATA)>1:
+            while i+1< len(HEX_DATA):
+                if HEX_DATA[i]<16 and HEX_DATA[i+1]<16:
+                    if ( HEX_DATA[i]>9):
+                        HEX_DATA[i] = 'a' + (HEX_DATA[i]-10)
+                    if (HEX_DATA[i+1] > 9):
+                        HEX_DATA[i+1] = 'a' + (HEX_DATA[i+1] - 10)
+
+                    hex_str = str(HEX_DATA[i])+""+str(HEX_DATA[i+1])
+                    print("hex string : ",hex_str)
+                    text = hex_to_text(hex_str)
+                    i+=2
+                    CHAR_DATA.append(text)
+                    print("Decrypted hex:", text)
+                else:
+                    print("#")
+                    i += 1
+        else:
+            print("Hex Data is empty")
         print("Decrypted CHAR data:", CHAR_DATA)
 
     def start(self):
@@ -294,7 +270,7 @@ class AudioListener:
                     channels=1,
                     samplerate=self.samplerate,
                     callback=self.audio_callback,
-                    blocksize=self.block_size  # Process in 20ms blocks
+                    blocksize=self.block_size
             ):
                 while self.running:
                     sd.sleep(100)
