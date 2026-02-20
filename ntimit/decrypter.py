@@ -12,14 +12,14 @@ import os
 
 buffer = "recorded/buffer.WAV"
 device = 'pulse'
-
+SAMPLE_RATE = 16000
 BLOCK_SIZE_SECONDS = 0.02
 HEX_DATA = []
-CHAR_DATA =[]
+CHAR_DATA = []
 
 
-def hex_to_text(hex):
-    return bytes.fromhex(hex).decode('utf-8')
+def hex_to_text(hex_str):
+    return bytes.fromhex(hex_str).decode('utf-8')
 
 
 def voice_to_hex(voice):
@@ -113,20 +113,23 @@ class AudioListener:
     def audio_callback(self, indata, frames, time, status):
         if status:
             print(f"Audio callback status: {status}")
+
         indata = indata.flatten()
         is_silent = self._is_silent(indata)
+
+        # Process voice to hex conversion for non-silent blocks
         if not is_silent:
-            self.silent_blocks_count = 0
             audio_chunk = indata.copy()
-
             hex_chunk = voice_to_hex(audio_chunk)
-            print("hex is: " , hex_chunk)
-            HEX_DATA.append(hex_chunk)
-
-            char_chunk = hex_to_text(hex_chunk)
-            print("character is         ",char_chunk)
-            CHAR_DATA.append(char_chunk)
-
+            if hex_chunk:  # Only append if we got a valid hex value
+                print("hex is: ", hex_chunk)
+                HEX_DATA.append(hex_chunk)
+                try:
+                    char_chunk = hex_to_text(hex_chunk)
+                    print("character is: ", char_chunk)
+                    CHAR_DATA.append(char_chunk)
+                except:
+                    print("Could not decode hex to text")
             if not self.listening:
                 if not is_silent:
                     print(f"\n🎤 Sound detected! Starting recording at {time.inputBufferAdcTime:.2f}s")
@@ -135,15 +138,14 @@ class AudioListener:
                     self.recording_frames = [audio_chunk]
             else:
                 self.recording_frames.append(audio_chunk)
-
-
         else:
-            self.silent_blocks_count += 1
-            if self.silent_blocks_count >= self.silence_threshold:
-                print(f"\n🛑 {self.silence_threshold} consecutive silent blocks detected. Stopping recording.")
-                self._stop_recording()
-                self.listening = False
-                self.silent_blocks_count = 0
+            if self.listening:
+                self.silent_blocks_count += 1
+                if self.silent_blocks_count >= self.silence_threshold:
+                    print(f"\n🛑 {self.silence_threshold} consecutive silent blocks detected. Stopping recording.")
+                    self._stop_recording()
+                    self.listening = False
+
 
     def _stop_recording(self):
         if self.recording_frames:
@@ -156,10 +158,14 @@ class AudioListener:
             duration = len(audio_np) / self.samplerate
             print(f"✅ Recording saved: {filename} (duration: {duration:.2f}s)")
 
-            decrypt_voice()
+            self.decrypt_voice()
 
             self.current_recording_id += 1
             self.recording_frames = []
+
+    def decrypt_voice(self):
+        print("Decrypted HEX data:", HEX_DATA)
+        print("Decrypted CHAR data:", CHAR_DATA)
 
     def start(self):
         """Start the audio listener"""
@@ -195,14 +201,10 @@ class AudioListener:
         print("Audio listener stopped")
 
 
-def decrypt_voice():
-    print(HEX_DATA)
-
-
 def main():
     listener = AudioListener(
         input_device='pulse',
-        samplerate=16000,
+        samplerate=SAMPLE_RATE,
         output_dir="recorded"
     )
     listener_thread = threading.Thread(target=listener.start)

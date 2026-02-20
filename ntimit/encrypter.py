@@ -51,6 +51,6 @@ def play_to_mic(path):
 
 
 if __name__ == "__main__":
-    inp = input("write something!")
+    inp = input("write something:\n")
     enc = encrypt(inp)
     play_to_mic(enc)
