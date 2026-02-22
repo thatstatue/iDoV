@@ -5,6 +5,9 @@ import sounddevice as sd
 import webrtcvad
 import soundfile as sf
 import numpy as np
+
+from etc.transmitter import FRAME_DURATION_MS
+
 LENGTH = (12+2)*20
 def print_devices():
     for i, d in enumerate(sd.query_devices()):
@@ -33,7 +36,7 @@ def synchronized_record_play(play_file, record_file, device='pulse'):
     play_thread.join()
 
 
-def play_and_record_with_vad(wav_path, output_recorded, vad_mode=2, frame_ms=1):
+def play_and_record_with_vad(wav_path, output_recorded, vad_mode=2, frame_ms=FRAME_DURATION_MS):
     #play_and_record_with_vad("recorded/REC_SA1-3_115.wav","recorded/REC_SA1-3_115_VAD.wav", 2, 20)
     vad = webrtcvad.Vad(vad_mode)
     data, sr = sf.read(wav_path, dtype='int16')

@@ -13,9 +13,7 @@ voices = ["test/SI648_146.WAV",     #0
           "test/SA2_100.WAV",       #b
           "test/SA2_119.WAV",       #c
           "test/SA2_148.WAV",       #d
-          "test/SA2_160.WAV",       #e
-          "test/SA2_188.WAV",       #f
-          "test/SA2_200.WAV",
+          "test/SA2_160.WAV",
           "test/SA2-2_97.WAV",      #16
           "test/SA2-2_124.WAV",
           "test/SA2-2_132.WAV",
@@ -36,13 +34,14 @@ def text_to_hex(text):
 def hex_to_voice(hex):
     i = 0
     j = 0
-    path = [voices_start]
+    path = [voices_start,voices_start]
     while i < len(str(hex)):
         n = hex[i]
         if 'a' <= hex[i] <= 'f':
             n = ord(n) - ord('a') + 10
         path.append(int(n))
         i+=1
+    path.append(voices_finish)
     path.append(voices_finish)
     print(path)
     return path
@@ -55,6 +54,7 @@ def play_to_mic(path):
         play_wav(voices[path[j]], device=device)
 
 if __name__ == "__main__":
+    #play_wav("OG/SA2.WAV", device=device) for changing inp dev
     inp = input("write something:\n")
     enc = encrypt(inp)
     play_to_mic(enc)
