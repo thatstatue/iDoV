@@ -8,7 +8,7 @@ import wave
 
 from scipy import signal
 
-from ntimit.consts import SAMPLE_RATE, BLOCK_SIZE, VOICE_SIGNATURES, voices, SIMILARITY_THRESHOLD, DEBOUNCE_SECONDS
+from ntimit.consts import SAMPLE_RATE, BLOCK_SIZE, VOICE_SIGNATURES, VOICES, SIMILARITY_THRESHOLD, DEBOUNCE_SECONDS
 
 
 def load_wav(path, target_fs=8000):
@@ -176,6 +176,7 @@ def longest_no_distortion(ogpath, decpath):
     #    print("MSE:", mse(original, decoded))
     #    print("SNR (dB):", snr(original, decoded))
     #    print("Spectral Distortion (dB):", spectral_distortion(original, decoded, fs))
+
 def decode_recorded_audio_aligned(audio_input, step=40):
     if isinstance(audio_input, str):
         if not os.path.exists(audio_input):
@@ -192,9 +193,6 @@ def decode_recorded_audio_aligned(audio_input, step=40):
 
     else:
         audio = np.asarray(audio_input, dtype=np.float32)
-    # normalize once globally (helps stability)
-    audio = audio - np.mean(audio)
-    audio = audio / (np.std(audio) + 1e-10)
 
     total_len = len(audio)
     best_offset = 0
@@ -252,7 +250,7 @@ def _best_match_score(chunk):
     for i, trig in enumerate(VOICE_SIGNATURES):
         if trig is None:
             continue
-        score = float(np.dot(a, trig) / len(trig))
+        score = float(np.dot(a, trig))
         if score > best_score:
             best_score = score
             best_idx = i
@@ -261,10 +259,6 @@ def _best_match_score(chunk):
 
 
 def voice_to_hex(audio_chunk , debounce=False):
-    """
-    Match a single BLOCK-sized audio chunk to the best voice signature.
-    Returns the index (int) of matched voice in voices list, or None if ambiguous/low-score.
-    """
     global VOICE_SIGNATURES, _last_detection_time, _last_detection_index
 
     if audio_chunk is None or len(audio_chunk) != BLOCK_SIZE:
@@ -299,7 +293,7 @@ def voice_to_hex(audio_chunk , debounce=False):
     scores.sort(key=lambda x: x[1], reverse=True)
     if len(scores) > 0:
         top_debug = ", ".join([f"{i}:{s:.3f}" for i, s in scores[:5]])
-        print(f"[DEBUG] top scores: {top_debug}")
+    #    print(f"[DEBUG] top scores: {top_debug}")
 
     # Enforce threshold and margin
     if best_score >= SIMILARITY_THRESHOLD:
@@ -310,12 +304,52 @@ def voice_to_hex(audio_chunk , debounce=False):
             return None
         _last_detection_time = now
         _last_detection_index = best_idx
-        print(f"[DEBUG] Matched idx={best_idx} score={best_score:.3f} margin={best_score - second_best:.3f}")
+       # print(f"[DEBUG] Matched idx={best_idx} score={best_score:.3f} margin={best_score - second_best:.3f}")
         return best_idx
 
     print(f"[DEBUG] No clear match. best={best_score:.3f}, second={second_best:.3f}")
     return None
 
+def load_voice_signatures():
+    for idx, voice_file in enumerate(VOICES):
+        try:
+            if not os.path.exists(voice_file):
+                print(f"Warning: Voice file not found: {voice_file}")
+                VOICE_SIGNATURES.append(None)
+                continue
+
+            data, sr = sf.read(voice_file, dtype='float32')
+            if data.ndim > 1:
+                data = np.mean(data, axis=1)
+
+            # Resample if needed
+            if sr != SAMPLE_RATE:
+                num_samples = int(len(data) * SAMPLE_RATE / sr)
+                data = signal.resample(data, num_samples)
+
+            # Normalize amplitude (avoid division by zero)
+            max_abs = np.max(np.abs(data)) + 1e-10
+            data = data / max_abs
+
+            # Force exact length BLOCK_SIZE: center-crop or pad with zeros
+            if len(data) > BLOCK_SIZE:
+                start = (len(data) - BLOCK_SIZE) // 2
+                data = data[start:start + BLOCK_SIZE]
+            elif len(data) < BLOCK_SIZE:
+                pad = BLOCK_SIZE - len(data)
+                left = pad // 2
+                right = pad - left
+                data = np.pad(data, (left, right), mode='constant', constant_values=0.0)
+
+            # Remove DC and normalize to unit-std (for Pearson)
+            data = data - np.mean(data)
+            std = np.std(data) + 1e-10
+            data = data / std
+
+            VOICE_SIGNATURES.append(data.astype(np.float32))
+        except Exception as e:
+            print(f"Error loading voice file {voice_file}: {e}")
+            VOICE_SIGNATURES.append(None)
 
 def calculate_similarity_fast(audio_segment, trigger_sig):
     """
@@ -347,60 +381,24 @@ def calculate_similarity_fast(audio_segment, trigger_sig):
 
 def decrypt_voice(voice):
     decoded = decode_recorded_audio_aligned(voice)
-    print("HEX_DATA (raw):", decoded)
-    i = 2
+  #  print("HEX_DATA (raw):", decoded)
+    i = 0
     out_chars = []
-    lost = False
-    if decoded[1] == decoded[2] == 16 :
-        i = 3
 
-    if len(decoded)%2==1:
-        lost = True
-    if len(decoded) > 2 :
-        while i + 1 < len(decoded):
-            a = decoded[i]
-            b = decoded[i + 1]
+    while i + 1 < len(decoded):
+        a = decoded[i]
+        b = decoded[i + 1]
 
-            if isinstance(a, int) and isinstance(b, int) and 0 <= a < 16 and 0 <= b < 16:
-                hex_pair = f"{a:x}{b:x}"
-                lower = 'a'
-                upper = 'z'
-                if hex_pair == ' ':
-                    out_chars.append(' ')
-                    i += 2
-                elif lower <= hex_pair <= upper:
-                    try:
-                        char = bytes.fromhex(hex_pair).decode('utf-8', errors='replace')
-                    except Exception:
-                        char = '?'
-                    out_chars.append(char)
-                    i += 2
-                else:
-                    if lost:
-                        i+=1
-                        lost = False
-                    # else:
-                    #     lost+=1
-                    #     hex6 =  f"{6:x}{b:x}"
-                    #     #hex7 = f"{7:x}{b:x}"
-                    #     try:
-                    #         a = bytes.fromhex(hex6).decode('utf-8', errors='replace')
-                    #         out_chars.append(a)
-                    #         i+=2
-                    #     except Exception:
-                    #         i+=1
-
-            else:
-                i += 1
-
-        if out_chars:
-            text = ''.join(out_chars)
-            print("Decrypted text appended:", text)
+        if 0 <= a < 16 and 0 <= b < 16:
+            hex_pair = f"{a:x}{b:x}"
+            char = bytes.fromhex(hex_pair).decode('utf-8', errors='replace')
+            out_chars.append(char)
+            i += 2
         else:
-            print("No valid hex pairs found to decrypt.")
-    else:
-        print("null decoded")
-
+            i += 1
+    if out_chars:
+        text = ''.join(out_chars)
+        print("Decrypted text appended:", text)
 
 def concatenate_wav_files_wave(input_files, output_file):
     """
@@ -411,12 +409,12 @@ def concatenate_wav_files_wave(input_files, output_file):
         raise ValueError("No input files provided")
 
     # Read first file to get parameters
-    with wave.open(voices[input_files[0]], 'rb') as first_wav:
+    with wave.open(VOICES[input_files[0]], 'rb') as first_wav:
         params = first_wav.getparams()
 
     # Verify all files have same parameters
     for idx in input_files[1:]:
-        with wave.open(voices[idx], 'rb') as wav:
+        with wave.open(VOICES[idx], 'rb') as wav:
             if wav.getparams() != params:
                 # Check if it's just the number of frames that's different
                 current_params = wav.getparams()
@@ -430,7 +428,7 @@ def concatenate_wav_files_wave(input_files, output_file):
         output.setparams(params)
 
         for idx in input_files:
-            with wave.open(voices[idx], 'rb') as wav:
+            with wave.open(VOICES[idx], 'rb') as wav:
                 frames = wav.readframes(wav.getnframes())
                 output.writeframes(frames)
 

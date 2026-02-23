@@ -1,7 +1,7 @@
 #todo: ایده اینه که یکی درمیون آپرکیس لوورکیس باشن که اگه چند بار دیتا ریپیت شد به مشکل نخوریم
 from ntimit.slicecomparator import comparator
-from ntimit.utilities import decrypt_voice
-from consts import voices
+from ntimit.utilities import decrypt_voice, load_voice_signatures
+from consts import VOICES, VOICE_SIGNATURES
 from ntimit.frcodec import run_vocoder_simulation
 from ntimit.utilities import concatenate_wav_files_wave
 from ntimit.virtualmic import play_wav
@@ -36,7 +36,7 @@ def encrypt(text):
 
 def play_to_mic(path):
     for j in range(len(path)):
-        play_wav(voices[path[j]], device=device)
+        play_wav(VOICES[path[j]], device=device)
 def hex_to_array(hex):
     a = [16,16]
     b = str(hex)
@@ -50,36 +50,54 @@ def main_for_phoning():
     inp = input("write something:\n")
     enc = encrypt(inp)
     play_to_mic(enc)
-if __name__ == "__main__":
-    inp = input("write something:\n")
-    a = hex_to_array( text_to_hex(inp))
-    h =str(hash(inp))  #"SA1_check"
-    pre = "test_results/"
-    outp= pre+h+"_encrypted.wav" #"OG/SA1.WAV"
-    concatenate_wav_files_wave(a,outp)
-    codedE = pre+h+"_encrypted_EFR.wav"
-    codedER = pre+h+"_encrypted_EFR_R.wav"
 
-    codedF = pre+h+"_encrypted_FR.wav"
-    codedFR = pre+h+"_encrypted_FR_R.wav"
 
-    #codedA = pre+h+"_encrypted_AMR.wav"
-    codedAR = pre+h+"_encrypted_AMR_R.wav"
-    codedAT = pre+h+"_encrypted_AMR_TSEQ.wav"
+def run_all_vocoders(outp , pre, h):
+    codedE = pre + h + "_encrypted_EFR.wav"
+    codedER = pre + h + "_encrypted_EFR_R.wav"
+
+    codedF = pre + h + "_encrypted_FR.wav"
+    codedFR = pre + h + "_encrypted_FR_R.wav"
+
+    codedA = pre + h + "_encrypted_AMR.wav"
+    codedAR = pre + h + "_encrypted_AMR_R.wav"
+    codedAT = pre + h + "_encrypted_AMR_TSEQ.wav"
 
     run_vocoder_simulation(outp, codedE, '../exe/gsmefr-encode.exe', '../exe/gsmefr-decode.exe')
     comparator(outp, codedE)
 
-    run_vocoder_simulation(outp, codedER, '../exe/gsmefr-encode-r.exe', '../exe/gsmefr-decode-r.exe')
-    comparator(outp, codedER)
-
+    # run_vocoder_simulation(outp, codedER, '../exe/gsmefr-encode-r.exe', '../exe/gsmefr-decode-r.exe')
+    # comparator(outp, codedER)
+    #
     run_vocoder_simulation(outp,codedF, '../exe/gsmfr-encode.exe', '../exe/gsmfr-decode.exe')
     comparator(outp,codedF)
-    run_vocoder_simulation(outp, codedFR, '../exe/gsmfr-encode-r.exe', '../exe/gsmfr-decode-r.exe')
-    comparator(outp, codedFR)
+    # run_vocoder_simulation(outp, codedFR, '../exe/gsmfr-encode-r.exe', '../exe/gsmfr-decode-r.exe')
+    # comparator(outp, codedFR)
 
-    run_vocoder_simulation(outp, codedAR, '../exe/amrefr-encode-r.exe', '../exe/amrefr-decode-r.exe')
-    comparator(outp, codedAR)
-    run_vocoder_simulation(outp, codedAT, '../exe/amrefr-tseq-enc.exe', '../exe/amrefr-tseq-dec.exe')
-    comparator(outp, codedAT)
-    #decrypt_voice(outp)
+    run_vocoder_simulation(outp, codedA, '../exe/amr_encoder.exe.exe', '../exe/amr_decoder.exe.exe')
+    comparator(outp, codedA)
+    # run_vocoder_simulation(outp, codedAR, '../exe/amrefr-encode-r.exe', '../exe/amrefr-decode-r.exe')
+    # comparator(outp, codedAR)
+    # run_vocoder_simulation(outp, codedAT, '../exe/amrefr-tseq-enc.exe', '../exe/amrefr-tseq-dec.exe')
+    # comparator(outp, codedAT)
+    return codedE, codedF, codedA
+
+
+if __name__ == "__main__":
+    load_voice_signatures()
+    print(f"Loaded {len([v for v in VOICE_SIGNATURES if v is not None])} voice signatures")
+
+    inp = input("write something:\n")
+    a = hex_to_array( text_to_hex(inp))
+    h =str(hash(inp))
+    pre = "test_results/"
+    outp= pre+h+"_encrypted.wav"
+    concatenate_wav_files_wave(a,outp)
+    e,f,a = run_all_vocoders(outp, pre, h)
+    decrypt_voice(outp)
+    decrypt_voice(e)
+    decrypt_voice(f)
+    decrypt_voice(a)
+
+
+

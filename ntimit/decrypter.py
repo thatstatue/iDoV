@@ -1,5 +1,6 @@
-from ntimit.consts import BLOCK_SIZE, SIMILARITY_THRESHOLD, DEBOUNCE_SECONDS, BLOCK_SIZE_SECONDS, SILENCE_THRESHOLD,voices
-from ntimit.utilities import decrypt_voice, decode_recorded_audio_aligned
+from ntimit.consts import BLOCK_SIZE, SIMILARITY_THRESHOLD, DEBOUNCE_SECONDS, BLOCK_SIZE_SECONDS, SILENCE_THRESHOLD, \
+    VOICES, VOICE_SIGNATURES, SAMPLE_RATE, DEVICE, OUTPUT_DIR
+from ntimit.utilities import decrypt_voice, decode_recorded_audio_aligned, load_voice_signatures
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
@@ -7,55 +8,6 @@ import threading
 import time
 import os
 from scipy import signal
-
-
-def load_voice_signatures():
-    """
-    Load each voice file, resample to SAMPLE_RATE, and force length == BLOCK_SIZE
-    by center-cropping or zero-padding. Normalize to zero-mean, unit-std.
-    """
-    global VOICE_SIGNATURES
-    VOICE_SIGNATURES = []
-
-    for idx, voice_file in enumerate(voices):
-        try:
-            if not os.path.exists(voice_file):
-                print(f"Warning: Voice file not found: {voice_file}")
-                VOICE_SIGNATURES.append(None)
-                continue
-
-            data, sr = sf.read(voice_file, dtype='float32')
-            if data.ndim > 1:
-                data = np.mean(data, axis=1)
-
-            # Resample if needed
-            if sr != SAMPLE_RATE:
-                num_samples = int(len(data) * SAMPLE_RATE / sr)
-                data = signal.resample(data, num_samples)
-
-            # Normalize amplitude (avoid division by zero)
-            max_abs = np.max(np.abs(data)) + 1e-10
-            data = data / max_abs
-
-            # Force exact length BLOCK_SIZE: center-crop or pad with zeros
-            if len(data) > BLOCK_SIZE:
-                start = (len(data) - BLOCK_SIZE) // 2
-                data = data[start:start + BLOCK_SIZE]
-            elif len(data) < BLOCK_SIZE:
-                pad = BLOCK_SIZE - len(data)
-                left = pad // 2
-                right = pad - left
-                data = np.pad(data, (left, right), mode='constant', constant_values=0.0)
-
-            # Remove DC and normalize to unit-std (for Pearson)
-            data = data - np.mean(data)
-            std = np.std(data) + 1e-10
-            data = data / std
-
-            VOICE_SIGNATURES.append(data.astype(np.float32))
-        except Exception as e:
-            print(f"Error loading voice file {voice_file}: {e}")
-            VOICE_SIGNATURES.append(None)
 
 
 def hex_to_text(hex_str):
@@ -170,15 +122,13 @@ class AudioListener:
 
 def main():
     # Load voice signatures before starting
-    global SAMPLE_RATE
-    SAMPLE_RATE = 16000
     load_voice_signatures()
     print(f"Loaded {len([v for v in VOICE_SIGNATURES if v is not None])} voice signatures")
 
     listener = AudioListener(
-        input_device='pulse',
-        samplerate=16000,
-        output_dir="recorded"
+        input_device=DEVICE,
+        samplerate=SAMPLE_RATE,
+        output_dir=OUTPUT_DIR
     )
     listener_thread = threading.Thread(target=listener.start)
     listener_thread.daemon = True
