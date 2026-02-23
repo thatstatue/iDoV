@@ -1,26 +1,11 @@
 #todo: ایده اینه که یکی درمیون آپرکیس لوورکیس باشن که اگه چند بار دیتا ریپیت شد به مشکل نخوریم
-
+from ntimit.slicecomparator import comparator
+from ntimit.utilities import decrypt_voice
+from consts import voices
+from ntimit.frcodec import run_vocoder_simulation
+from ntimit.utilities import concatenate_wav_files_wave
 from ntimit.virtualmic import play_wav
 
-voices = ["test/SI648_146.WAV",     #0
-          "test/SI648_134.WAV",     #1
-          "test/SI648_88.WAV",      #2
-          "test/SI648_60.WAV",      #3
-          "test/SI648_11.WAV",      #4
-          "test/SA1-3_127.WAV",     #5    #8
-          "test/SA1-3_151.WAV",     #9
-          "test/SA2_84.WAV",        #a
-          "test/SA2_100.WAV",       #b
-          "test/SA2_119.WAV",       #c
-          "test/SA2_148.WAV",       #d
-          "test/SA2_160.WAV",
-          "test/SA2-2_97.WAV",      #16
-          "test/SA2-2_124.WAV",
-          "test/SA2-2_132.WAV",
-          "test/SA1-3_115.WAV",
-          "test/SI648_35.WAV",
-          "test/SA1-3_139.WAV",
-          ]
 
 voices_start = 16
 voices_finish = 17
@@ -52,9 +37,49 @@ def encrypt(text):
 def play_to_mic(path):
     for j in range(len(path)):
         play_wav(voices[path[j]], device=device)
-
-if __name__ == "__main__":
+def hex_to_array(hex):
+    a = [16,16]
+    b = str(hex)
+    for i in range(len(b)) :
+         a.append(int (hex[i], 16))
+    a.append(17)
+    a.append(17)
+    return a
+def main_for_phoning():
     #play_wav("OG/SA2.WAV", device=device) for changing inp dev
     inp = input("write something:\n")
     enc = encrypt(inp)
     play_to_mic(enc)
+if __name__ == "__main__":
+    inp = input("write something:\n")
+    a = hex_to_array( text_to_hex(inp))
+    h =str(hash(inp))  #"SA1_check"
+    pre = "test_results/"
+    outp= pre+h+"_encrypted.wav" #"OG/SA1.WAV"
+    concatenate_wav_files_wave(a,outp)
+    codedE = pre+h+"_encrypted_EFR.wav"
+    codedER = pre+h+"_encrypted_EFR_R.wav"
+
+    codedF = pre+h+"_encrypted_FR.wav"
+    codedFR = pre+h+"_encrypted_FR_R.wav"
+
+    #codedA = pre+h+"_encrypted_AMR.wav"
+    codedAR = pre+h+"_encrypted_AMR_R.wav"
+    codedAT = pre+h+"_encrypted_AMR_TSEQ.wav"
+
+    run_vocoder_simulation(outp, codedE, '../exe/gsmefr-encode.exe', '../exe/gsmefr-decode.exe')
+    comparator(outp, codedE)
+
+    run_vocoder_simulation(outp, codedER, '../exe/gsmefr-encode-r.exe', '../exe/gsmefr-decode-r.exe')
+    comparator(outp, codedER)
+
+    run_vocoder_simulation(outp,codedF, '../exe/gsmfr-encode.exe', '../exe/gsmfr-decode.exe')
+    comparator(outp,codedF)
+    run_vocoder_simulation(outp, codedFR, '../exe/gsmfr-encode-r.exe', '../exe/gsmfr-decode-r.exe')
+    comparator(outp, codedFR)
+
+    run_vocoder_simulation(outp, codedAR, '../exe/amrefr-encode-r.exe', '../exe/amrefr-decode-r.exe')
+    comparator(outp, codedAR)
+    run_vocoder_simulation(outp, codedAT, '../exe/amrefr-tseq-enc.exe', '../exe/amrefr-tseq-dec.exe')
+    comparator(outp, codedAT)
+    #decrypt_voice(outp)

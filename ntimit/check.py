@@ -1,29 +1,17 @@
+from pygame.examples.music_drop_fade import play_file
+
+from ntimit.consts import BLOCK_SIZE, SIMILARITY_THRESHOLD, DEBOUNCE_SECONDS, BLOCK_SIZE_SECONDS, SILENCE_THRESHOLD, \
+    voices, SAMPLE_RATE, DETECTION_THRESHOLD, STEP_SIZE
 from ntimit.encrypter import voices
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
 import threading
-import os
 import time
 from scipy import signal
 
-# =========================
-# CONFIG
-# =========================
+from ntimit.virtualmic import play_wav, record_from_virtual_speaker
 
-SAMPLE_RATE = 16000
-BLOCK_DURATION = 0.24
-BLOCK_SIZE = int(SAMPLE_RATE * BLOCK_DURATION)  # 3840
-STEP_SIZE = 80  # 5ms shift
-DETECTION_THRESHOLD = 0.80  # strong match only
-
-VOICE_SIGNATURES = []
-HEX_DATA = []
-CHAR_DATA = []
-
-# =========================
-# TEMPLATE LOADING
-# =========================
 
 def load_voice_signatures():
     global VOICE_SIGNATURES
@@ -181,7 +169,7 @@ def dummy_listener():
     duration = 1000 * 15
     record_file = "recorded/REC_DELETE_LATER.wav"
 
-    play_thread = Thread(target=play_wav, args=(play_file, device, False))
+    play_thread = threading.Thread(target=play_wav, args=(play_file, device, False))
     play_thread.start()
     record_from_virtual_speaker(record_file, device, sr, duration)
     play_thread.join()

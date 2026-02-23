@@ -3,7 +3,7 @@ import os
 import soundfile as sf
 
 from ntimit.frcodec import run_vocoder_simulation
-from ntimit.utilities import extract_voice_features, longest_no_distortion, load_wav, extract_bandwidth
+from ntimit.utilities import extract_voice_features, load_wav, extract_bandwidth, extract_frame_count, frame_signal
 
 
 # sa2: fr
@@ -41,16 +41,18 @@ def comparator(ogpath, decpath):
 
     fs, original = load_wav(ogpath)
     bandwidth_og = extract_bandwidth(original, fs)
+    print(ogpath , " frames: ", len(frame_signal(original, fs)))
+
     fs, decoded = load_wav(decpath)
     bandwidth_dec = extract_bandwidth(decoded, fs)
+    print(decoded , " frames: ", len(frame_signal(original, fs)))
 
     t = 0
     for i in range(len(bandwidth_og)):
         if bandwidth_og[i] != bandwidth_dec[i]:
-            print("diff in ", ogpath, i)
+           # print("diff in ", ogpath, i)
             t = t +1
-    if t<4 :
-        print( "diffs in ", ogpath, " are ", t)
+    print( "count of diffs in ", ogpath, "and" , decpath, " are ", t)
 
 def create_slices(name, s, f, d, c): #fin, diff, count
     l = (f-s)-d*(c-1)
@@ -189,6 +191,6 @@ def add_to_alphabet():
     slice_and_test_WAV(name ,"test/SI648_",s,s+12,12)
 
 if __name__ == "__main__":
-    #comparator("test/SA2-2_132.WAV","test/SA2-2_132_FR.WAV")
-    add_to_alphabet()
+    comparator("OG/SX217.WAV","test_results/5991327444211853234_encrypted_AMR.wav")
+    #add_to_alphabet()
 

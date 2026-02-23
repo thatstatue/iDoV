@@ -1,4 +1,5 @@
-from ntimit.encrypter import voices
+from ntimit.consts import BLOCK_SIZE, SIMILARITY_THRESHOLD, DEBOUNCE_SECONDS, BLOCK_SIZE_SECONDS, SILENCE_THRESHOLD,voices
+from ntimit.utilities import decrypt_voice, decode_recorded_audio_aligned
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
@@ -6,19 +7,6 @@ import threading
 import time
 import os
 from scipy import signal
-
-buffer = "recorded/buffer.WAV"
-device = 'pulse'
-SAMPLE_RATE = 16000
-BLOCK_SIZE_SECONDS = 0.24
-#HEX_DATA = []
-CHAR_DATA = []
-SILENCE_THRESHOLD = 1
-VOICE_SIGNATURES = []
-SIMILARITY_THRESHOLD = 0
-
-BLOCK_SIZE = int(SAMPLE_RATE * BLOCK_SIZE_SECONDS)  # 3840
-DEBOUNCE_SECONDS = 0.20  # ignore detections within this time window
 
 
 def load_voice_signatures():
@@ -78,91 +66,6 @@ def hex_to_text(hex_str):
     except:
         return "?"
 
-
-def voice_to_hex(audio_chunk , debounce=False):
-    """
-    Match a single BLOCK-sized audio chunk to the best voice signature.
-    Returns the index (int) of matched voice in voices list, or None if ambiguous/low-score.
-    """
-    global VOICE_SIGNATURES, _last_detection_time, _last_detection_index
-
-    if audio_chunk is None or len(audio_chunk) != BLOCK_SIZE:
-        # If it's not the exact length, reject
-        print(f"[DEBUG] voice_to_hex: rejecting chunk of length {None if audio_chunk is None else len(audio_chunk)}")
-        return None
-
-    # Preprocess audio chunk: DC removal and unit-std
-    a = np.asarray(audio_chunk, dtype=np.float32)
-    a = a - np.mean(a)
-    std_a = np.std(a) + 1e-10
-    a = a / std_a
-
-    best_idx = None
-    best_score = -2.0
-    second_best = -2.0
-    scores = []
-
-    for i, trig in enumerate(VOICE_SIGNATURES):
-        if trig is None:
-            continue
-        score = calculate_similarity_fast(a, trig)
-        scores.append((i, score))
-        if score > best_score:
-            second_best = best_score
-            best_score = score
-            best_idx = i
-        elif score > second_best:
-            second_best = score
-
-    # Debug print top few scores
-    scores.sort(key=lambda x: x[1], reverse=True)
-    if len(scores) > 0:
-        top_debug = ", ".join([f"{i}:{s:.3f}" for i, s in scores[:5]])
-        print(f"[DEBUG] top scores: {top_debug}")
-
-    # Enforce threshold and margin
-    if best_score >= SIMILARITY_THRESHOLD:
-        now = time.time()
-        # Debounce: ignore immediate repeats within DEBOUNCE_SECONDS
-        if debounce and _last_detection_index == best_idx and (now - _last_detection_time) < DEBOUNCE_SECONDS:
-            print(f"[DEBUG] Debounced repeated detection idx={best_idx}")
-            return None
-        _last_detection_time = now
-        _last_detection_index = best_idx
-        print(f"[DEBUG] Matched idx={best_idx} score={best_score:.3f} margin={best_score - second_best:.3f}")
-        return best_idx
-
-    print(f"[DEBUG] No clear match. best={best_score:.3f}, second={second_best:.3f}")
-    return None
-
-
-def calculate_similarity_fast(audio_segment, trigger_sig):
-    """
-    Phase-insensitive similarity using FFT magnitude correlation.
-    """
-
-    if trigger_sig is None:
-        return -2.0
-
-    # Windowing improves stability
-    window = np.hanning(len(audio_segment))
-
-    a = audio_segment * window
-    t = trigger_sig * window
-
-    # FFT
-    A = np.abs(np.fft.rfft(a))
-    T = np.abs(np.fft.rfft(t))
-
-    # Normalize
-    A = A - np.mean(A)
-    T = T - np.mean(T)
-
-    A /= (np.std(A) + 1e-10)
-    T /= (np.std(T) + 1e-10)
-
-    return float(np.dot(A, T) / len(T))
-
 class AudioListener:
     def __init__(self, input_device=None, samplerate=16000, output_dir="recorded"):
         self.input_device = input_device
@@ -203,34 +106,25 @@ class AudioListener:
                 block = np.pad(block, (left, right), mode='constant')
         self._process_queue.append(block)
 
-    def _process_full_buffer(self):
-        while len(self._sample_buffer) >= self.block_size:
-            chunk = self._sample_buffer[:self.block_size]
-            self._sample_buffer = self._sample_buffer[self.block_size:]
-
-            detected = voice_to_hex(chunk)
-
-            if detected is not None:
-                #HEX_DATA.append(detected) todo fix
-                print(f"[DETECT] appended token {detected}")
-            else:
-                print("[DETECT] no confident token for this block")
 
     def audio_callback(self, indata, frames, time_, status):
         if status: print("Audio callback status:", status)
         is_silent = self._is_silent(indata)
         if not is_silent:
+            if not self.listening:
+                print("audio callback listening. please be patient...")
+
             self.listening = True
             self.silent_blocks_count = 0
 
-            print("not silent")
+            #print("[DEBUG] not silent")
             samples = indata.flatten().astype(np.float32)
             self._sample_buffer = np.concatenate((self._sample_buffer, samples))
             self.recording_frames.append(indata.copy())
         else:  # silent block
 
             if self.listening:
-                print("listening")
+                #print("[DEBUG] listening")
                 self.silent_blocks_count += 1
                 if self.silent_blocks_count >= self.silence_threshold:
                     print("more")
@@ -245,50 +139,10 @@ class AudioListener:
             sf.write(filename, audio_np, self.samplerate)
             duration = len(audio_np) / self.samplerate
             print(f"✅ Recording saved: {filename} (duration: {duration:.2f}s)")
-           # decode_recorded_audio_aligned(audio_np)
-            decoded = decode_recorded_audio_aligned(filename)
-            # After saving the file, attempt decryption of token stream
-            self.decrypt_voice(decoded)
+            decrypt_voice(filename)
 
             self.current_recording_id += 1
             self.recording_frames = []
-        #self._process_full_buffer() todo might add
-
-    def decrypt_voice(self, decoded):
-        # Build bytes from pairs of nibbles (0..15). Values >=16 are treated as separators/control.
-        print("HEX_DATA (raw):", decoded)
-        i = 0
-        out_chars = []
-        while not decoded[i]==16:
-            print("HEX_DATA (raw):", decoded[i])
-            i+=1
-        while i + 1 < len(decoded):
-            a = decoded[i]
-            b = decoded[i + 1]
-            # only combine if both are integer nibbles 0..15
-            if isinstance(a, int) and isinstance(b, int) and 0 <= a < 16 and 0 <= b < 16:
-                # convert to hex string: 0..9 -> '0'..'9', 10..15 -> 'a'..'f'
-                hex_pair = f"{a:x}{b:x}"
-                try:
-                    # decode pair into a single byte then to utf-8 char
-                    char = bytes.fromhex(hex_pair).decode('utf-8', errors='replace')
-                except Exception:
-                    char = '?'
-                out_chars.append(char)
-                i += 2
-            else:
-                # skip single token if it's a separator or control or out-of-range
-                i += 1
-
-        # append to CHAR_DATA
-        if out_chars:
-            text = ''.join(out_chars)
-            CHAR_DATA.append(text)
-            print("Decrypted text appended:", text)
-        else:
-            print("No valid hex pairs found to decrypt.")
-        # clear HEX_DATA after processing to avoid re-processing same tokens
-        #HEX_DATA.clear()
 
     def start(self):
         print(f"🎧 Audio listener started on device: {self.input_device}")
@@ -312,96 +166,6 @@ class AudioListener:
         self.running = False
         self._stop_recording()
         print("Audio listener stopped")
-
-def decode_recorded_audio_aligned(audio_input, step=40):
-    if isinstance(audio_input, str):
-        if not os.path.exists(audio_input):
-            raise FileNotFoundError(f"File not found: {audio_input}")
-
-        audio, sr = sf.read(audio_input, dtype='float32')
-
-        if audio.ndim > 1:
-            audio = np.mean(audio, axis=1)
-
-        if sr != SAMPLE_RATE:
-            num_samples = int(len(audio) * SAMPLE_RATE / sr)
-            audio = signal.resample(audio, num_samples)
-
-    else:
-        audio = np.asarray(audio_input, dtype=np.float32)
-    # normalize once globally (helps stability)
-    audio = audio - np.mean(audio)
-    audio = audio / (np.std(audio) + 1e-10)
-
-    total_len = len(audio)
-    best_offset = 0
-    best_avg_score = -1.0
-
-    print("[ALIGN] Searching best starting offset...")
-
-    # Try candidate offsets only within first BLOCK_SIZE
-    for offset in range(0, BLOCK_SIZE, step):
-
-        scores = []
-        pos = offset
-
-        while pos + BLOCK_SIZE <= total_len:
-            chunk = audio[pos:pos + BLOCK_SIZE]
-            idx, score = _best_match_score(chunk)
-            if score is not None:
-                scores.append(score)
-            pos += BLOCK_SIZE
-
-        if len(scores) == 0:
-            continue
-
-        avg_score = np.mean(scores)
-
-        if avg_score > best_avg_score:
-            best_avg_score = avg_score
-            best_offset = offset
-
-    print(f"[ALIGN] Best offset = {best_offset} samples "
-          f"(~{best_offset/SAMPLE_RATE:.4f}s) "
-          f"avg_score={best_avg_score:.3f}")
-
-    # Now decode using best offset
-    decoded = []
-    pos = best_offset
-
-    while pos + BLOCK_SIZE <= total_len:
-        chunk = audio[pos:pos + BLOCK_SIZE]
-        token = voice_to_hex(chunk)
-        if token is not None:
-            decoded.append(token)
-        pos += BLOCK_SIZE
-
-    return decoded
-
-def _best_match_score(chunk):
-    """
-    Returns (best_index, best_score) without threshold rejection.
-    Used only for alignment scoring.
-    """
-
-    if len(chunk) != BLOCK_SIZE:
-        return None, None
-
-    a = chunk - np.mean(chunk)
-    a /= (np.std(a) + 1e-10)
-
-    best_idx = None
-    best_score = -2.0
-
-    for i, trig in enumerate(VOICE_SIGNATURES):
-        if trig is None:
-            continue
-        score = float(np.dot(a, trig) / len(trig))
-        if score > best_score:
-            best_score = score
-            best_idx = i
-
-    return best_idx, best_score
 
 
 def main():
