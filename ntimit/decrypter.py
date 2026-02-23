@@ -1,13 +1,11 @@
-from ntimit.consts import BLOCK_SIZE, SIMILARITY_THRESHOLD, DEBOUNCE_SECONDS, BLOCK_SIZE_SECONDS, SILENCE_THRESHOLD, \
-    VOICES, VOICE_SIGNATURES, SAMPLE_RATE, DEVICE, OUTPUT_DIR
-from ntimit.utilities import decrypt_voice, decode_recorded_audio_aligned, load_voice_signatures
+from ntimit.consts import BLOCK_SIZE, BLOCK_SIZE_SECONDS, SILENCE_THRESHOLD, VOICE_SIGNATURES, SAMPLE_RATE, INPUT_DEVICE, OUTPUT_DIR
+from ntimit.utilities import decrypt_voice, load_voice_signatures
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
 import threading
 import time
 import os
-from scipy import signal
 
 
 def hex_to_text(hex_str):
@@ -45,7 +43,6 @@ class AudioListener:
         return rms < self.energy_threshold
 
     def _enqueue_block(self, block):
-        """Ensure block is length block_size, then add to queue for processing."""
         if len(block) != self.block_size:
             # If block delivered shorter/longer, center-trim or pad
             if len(block) > self.block_size:
@@ -64,22 +61,20 @@ class AudioListener:
         is_silent = self._is_silent(indata)
         if not is_silent:
             if not self.listening:
-                print("audio callback listening. please be patient...")
+               x = 1# print("audio callback listening. please be patient...")
 
             self.listening = True
             self.silent_blocks_count = 0
 
-            #print("[DEBUG] not silent")
             samples = indata.flatten().astype(np.float32)
             self._sample_buffer = np.concatenate((self._sample_buffer, samples))
             self.recording_frames.append(indata.copy())
         else:  # silent block
 
             if self.listening:
-                #print("[DEBUG] listening")
                 self.silent_blocks_count += 1
                 if self.silent_blocks_count >= self.silence_threshold:
-                    print("more")
+                    print("silence detected")
                     self._stop_recording()
                     self.listening = False
 
@@ -126,7 +121,7 @@ def main():
     print(f"Loaded {len([v for v in VOICE_SIGNATURES if v is not None])} voice signatures")
 
     listener = AudioListener(
-        input_device=DEVICE,
+        input_device=INPUT_DEVICE,
         samplerate=SAMPLE_RATE,
         output_dir=OUTPUT_DIR
     )

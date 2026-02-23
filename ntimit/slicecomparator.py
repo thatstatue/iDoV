@@ -3,7 +3,7 @@ import os
 import soundfile as sf
 
 from ntimit.frcodec import run_vocoder_simulation
-from ntimit.utilities import extract_voice_features, load_wav, extract_bandwidth, extract_frame_count, frame_signal
+from ntimit.utilities import load_wav, extract_bandwidth, frame_signal
 
 
 # sa2: fr

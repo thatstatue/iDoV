@@ -8,7 +8,7 @@ import wave
 
 from scipy import signal
 
-from ntimit.consts import SAMPLE_RATE, BLOCK_SIZE, VOICE_SIGNATURES, VOICES, SIMILARITY_THRESHOLD, DEBOUNCE_SECONDS
+from ntimit.consts import SAMPLE_RATE, BLOCK_SIZE, VOICES, SIMILARITY_THRESHOLD, DEBOUNCE_SECONDS
 
 
 def load_wav(path, target_fs=8000):
@@ -198,7 +198,7 @@ def decode_recorded_audio_aligned(audio_input, step=40):
     best_offset = 0
     best_avg_score = -1.0
 
-    print("[ALIGN] Searching best starting offset...")
+    #print("[ALIGN] Searching best starting offset...")
 
     # Try candidate offsets only within first BLOCK_SIZE
     for offset in range(0, BLOCK_SIZE, step):
@@ -222,9 +222,7 @@ def decode_recorded_audio_aligned(audio_input, step=40):
             best_avg_score = avg_score
             best_offset = offset
 
-    print(f"[ALIGN] Best offset = {best_offset} samples "
-          f"(~{best_offset/SAMPLE_RATE:.4f}s) "
-          f"avg_score={best_avg_score:.3f}")
+   # print(f"[ALIGN] Best offset = {best_offset} samples "  f"(~{best_offset/SAMPLE_RATE:.4f}s) " f"avg_score={best_avg_score:.3f}")
     decoded = []
     pos = best_offset
 
@@ -352,9 +350,6 @@ def load_voice_signatures():
             VOICE_SIGNATURES.append(None)
 
 def calculate_similarity_fast(audio_segment, trigger_sig):
-    """
-    Phase-insensitive similarity using FFT magnitude correlation.
-    """
 
     if trigger_sig is None:
         return -2.0
@@ -398,13 +393,10 @@ def decrypt_voice(voice):
             i += 1
     if out_chars:
         text = ''.join(out_chars)
-        print("Decrypted text appended:", text)
+        #print("Decrypted text appended:", text)
+        print(text)
 
 def concatenate_wav_files_wave(input_files, output_file):
-    """
-    Concatenate WAV files using the built-in wave module.
-    Assumes all files have the same sample rate, sample width, and channels.
-    """
     if not input_files:
         raise ValueError("No input files provided")
 

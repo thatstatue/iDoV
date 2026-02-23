@@ -1,15 +1,14 @@
 #todo: ایده اینه که یکی درمیون آپرکیس لوورکیس باشن که اگه چند بار دیتا ریپیت شد به مشکل نخوریم
 from ntimit.slicecomparator import comparator
 from ntimit.utilities import decrypt_voice, load_voice_signatures
-from consts import VOICES, VOICE_SIGNATURES
+from consts import VOICES, VOICE_SIGNATURES, INPUT_DEVICE, OUTPUT_DEVICE
 from ntimit.frcodec import run_vocoder_simulation
 from ntimit.utilities import concatenate_wav_files_wave
 from ntimit.virtualmic import play_wav
-
+import sounddevice as sd
 
 voices_start = 16
 voices_finish = 17
-device = 'pulse'
 def text_to_hex(text):
     v = text.encode('utf-8').hex()
     print("hex: ",v)
@@ -36,7 +35,7 @@ def encrypt(text):
 
 def play_to_mic(path):
     for j in range(len(path)):
-        play_wav(VOICES[path[j]], device=device)
+        play_wav(VOICES[path[j]], device=OUTPUT_DEVICE)
 def hex_to_array(hex):
     a = [16,16]
     b = str(hex)
@@ -83,21 +82,30 @@ def run_all_vocoders(outp , pre, h):
     return codedE, codedF, codedA,codedAR, codedAT
 
 
-if __name__ == "__main__":
-    load_voice_signatures()
-    print(f"Loaded {len([v for v in VOICE_SIGNATURES if v is not None])} voice signatures")
-
-    inp = input("write something:\n")
-    a = hex_to_array( text_to_hex(inp))
-    h =str(hash(inp))
-    pre = "test_results/"
-    outp= pre+h+"_encrypted.wav"
-    concatenate_wav_files_wave(a,outp)
-    e,f,a , ar,at= run_all_vocoders(outp, pre, h)
+def simulators():
+    global a
+    e, f, a, ar, at = run_all_vocoders(outp, pre, h)
     decrypt_voice(outp)
     decrypt_voice(e)
     decrypt_voice(at)
     decrypt_voice(ar)
+
+
+if __name__ == "__main__":
+    load_voice_signatures()
+    print(f"Loaded {len([v for v in VOICE_SIGNATURES if v is not None])} voice signatures")
+    while True:
+        inp = input("write something:\n")
+        a = hex_to_array( text_to_hex(inp))
+        h =str(hash(inp))
+        pre = "test_results/"
+        outp= pre+h+"_encrypted.wav"
+        concatenate_wav_files_wave(a,outp)
+        #for i in range(10):
+        play_wav(outp, device=OUTPUT_DEVICE)
+       #     sd.sleep(100)
+
+        #simulators()
 
 
 
