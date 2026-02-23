@@ -60,7 +60,7 @@ def run_all_vocoders(outp , pre, h):
     codedFR = pre + h + "_encrypted_FR_R.wav"
 
     codedA = pre + h + "_encrypted_AMR.wav"
-    codedAR = pre + h + "_encrypted_AMR_R.wav"
+    codedAR = pre + h + "_encrypted_AMR_TW.wav"
     codedAT = pre + h + "_encrypted_AMR_TSEQ.wav"
 
     run_vocoder_simulation(outp, codedE, '../exe/gsmefr-encode.exe', '../exe/gsmefr-decode.exe')
@@ -76,11 +76,11 @@ def run_all_vocoders(outp , pre, h):
 
     run_vocoder_simulation(outp, codedA, '../exe/amr_encoder.exe.exe', '../exe/amr_decoder.exe.exe')
     comparator(outp, codedA)
-    # run_vocoder_simulation(outp, codedAR, '../exe/amrefr-encode-r.exe', '../exe/amrefr-decode-r.exe')
-    # comparator(outp, codedAR)
-    # run_vocoder_simulation(outp, codedAT, '../exe/amrefr-tseq-enc.exe', '../exe/amrefr-tseq-dec.exe')
-    # comparator(outp, codedAT)
-    return codedE, codedF, codedA
+    run_vocoder_simulation(outp, codedAR, '../exe/twamr-encode.exe', '../exe/atwamr-decode.exe')
+    comparator(outp, codedAR)
+    run_vocoder_simulation(outp, codedAT, '../exe/twamr-tseq-enc.exe', '../exe/twamr-tseq-dec.exe')
+    comparator(outp, codedAT)
+    return codedE, codedF, codedA,codedAR, codedAT
 
 
 if __name__ == "__main__":
@@ -93,11 +93,11 @@ if __name__ == "__main__":
     pre = "test_results/"
     outp= pre+h+"_encrypted.wav"
     concatenate_wav_files_wave(a,outp)
-    e,f,a = run_all_vocoders(outp, pre, h)
+    e,f,a , ar,at= run_all_vocoders(outp, pre, h)
     decrypt_voice(outp)
     decrypt_voice(e)
-    decrypt_voice(f)
-    decrypt_voice(a)
+    decrypt_voice(at)
+    decrypt_voice(ar)
 
 
 
